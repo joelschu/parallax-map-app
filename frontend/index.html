@@ -85,8 +85,11 @@
 
   const API_BASE = "https://parallax-map-app.onrender.com";
 
-  const map = L.map("map").setView([0, 0], 2);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const map = L.map("map", {
+    minZoom:10
+  })
+  .setView([50.952301362948674, 1.8607453758982468], 12);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
 
