@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+<style>
+  html, body { margin: 0; height: 100%; font-family: sans-serif; }
+  #map { height: 100%; width: 100%; }
+  #status {
+    position: absolute; top: 10px; left: 50px; z-index: 1000;
+    background: white; padding: 6px 12px; border-radius: 4px;
+    font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+
+  /* Data entry modal, shown after a shape is drawn */
+  #overlay {
+    display: none; position: fixed; inset: 0; z-index: 2000;
+    background: rgba(0,0,0,0.4);
+    align-items: center; justify-content: center;
+  }
+  #form-card {
+    background: white; width: 320px; max-width: 90vw;
+    padding: 20px; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  #form-card h3 { margin: 0 0 12px; font-size: 16px; }
+  #form-card label {
+    display: block; font-size: 12px; color: #555; margin: 10px 0 4px;
+  }
+  #form-card input, #form-card textarea {
+    width: 100%; box-sizing: border-box; padding: 6px 8px;
+    font-size: 13px; border: 1px solid #ccc; border-radius: 4px;
+  }
+  #form-actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
+  }
+  #form-actions button {
+    padding: 6px 14px; font-size: 13px; border-radius: 4px;
+    border: 1px solid #ccc; background: white; cursor: pointer;
+  }
+  #form-actions button.primary {
+    background: #2b6cb0; color: white; border-color: #2b6cb0;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="status">Loading…</div>
+
+<div id="overlay">
+  <div id="form-card">
+    <h3>Add details</h3>
+    <form id="datapoint-form">
+      <label for="f-name">Name</label>
+      <input id="f-name" name="name" type="text" placeholder="e.g. River restoration zone" />
+
+      <label for="f-start">Start date</label>
+      <input id="f-start" name="start_date" type="date" />
+
+      <label for="f-end">End date</label>
+      <input id="f-end" name="end_date" type="date" />
+
+      <label for="f-policy">Policy</label>
+      <input id="f-policy" name="policy" type="text" placeholder="e.g. Clean Water Act" />
+
+      <label for="f-cost">Cost</label>
+      <input id="f-cost" name="cost" type="number" step="0.01" placeholder="e.g. 25000" />
+
+      <label for="f-funders">Funders</label>
+      <input id="f-funders" name="funders" type="text" placeholder="e.g. EU LIFE, City Council" />
+
+      <div id="form-actions">
+        <button type="button" id="cancel-btn">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script>
+  // Point this at your deployed API. For local dev, leave as-is with the
+  // backend running on port 3001.
+  const API_BASE = "http://localhost:3001";
+
+  const map = L.map("map").setView([0, 0], 2);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+
+  const drawnItems = new L.FeatureGroup().addTo(map);
+
+  const drawControl = new L.Control.Draw({
+    edit: { featureGroup: drawnItems },
+    draw: {
+      polygon: true,
+      polyline: true,
+      rectangle: true,
+      circle: false,
+      circlemarker: false,
+      marker: true,
+    },
+  });
+  map.addControl(drawControl);
+
+  const statusEl = document.getElementById("status");
+  const overlay = document.getElementById("overlay");
+  const form = document.getElementById("datapoint-form");
+  const cancelBtn = document.getElementById("cancel-btn");
+
+  // Builds a readable popup body from a properties object.
+  function popupContent(props) {
+    const rows = [
+      ["Start", props.start_date],
+      ["End", props.end_date],
+      ["Policy", props.policy],
+      ["Cost", props.cost != null && props.cost !== "" ? props.cost : null],
+      ["Funders", props.funders],
+    ].filter(([, value]) => value);
+
+    const title = props.name ? `<strong>${props.name}</strong><br>` : "";
+    const details = rows.map(([k, v]) => `${k}: ${v}`).join("<br>");
+    return title + details || "(no details)";
+  }
+
+  // Opens the form modal and resolves with the entered fields, or null if cancelled.
+  function promptForDetails() {
+    return new Promise((resolve) => {
+      form.reset();
+      overlay.style.display = "flex";
+
+      function cleanup() {
+        overlay.style.display = "none";
+        form.removeEventListener("submit", onSubmit);
+        cancelBtn.removeEventListener("click", onCancel);
+      }
+      function onSubmit(e) {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(form).entries());
+        cleanup();
+        resolve(data);
+      }
+      function onCancel() {
+        cleanup();
+        resolve(null);
+      }
+      form.addEventListener("submit", onSubmit);
+      cancelBtn.addEventListener("click", onCancel);
+    });
+  }
+
+  // Load existing shapes on startup.
+  async function loadShapes() {
+    statusEl.textContent = "Loading shapes…";
+    try {
+      const res = await fetch(`${API_BASE}/api/shapes`);
+      const geojson = await res.json();
+      L.geoJSON(geojson, {
+        onEachFeature: (feature, layer) => {
+          layer._dbId = feature.id;
+          layer.bindPopup(popupContent(feature.properties || {}));
+        },
+      }).eachLayer((layer) => drawnItems.addLayer(layer));
+      statusEl.textContent = `${geojson.features.length} shape(s) loaded`;
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = "Could not reach the API";
+    }
+  }
+
+  // Save a newly drawn shape, after collecting its data fields.
+  map.on(L.Draw.Event.CREATED, async (e) => {
+    const layer = e.layer;
+    drawnItems.addLayer(layer);
+
+    const details = await promptForDetails();
+    if (!details) {
+      // User cancelled — drop the shape instead of saving it half-filled.
+      drawnItems.removeLayer(layer);
+      return;
+    }
+
+    const feature = layer.toGeoJSON();
+    feature.properties = { ...feature.properties, ...details };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/shapes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(feature),
+      });
+      const saved = await res.json();
+      layer._dbId = saved.id;
+      layer.bindPopup(popupContent(saved.properties || {}));
+      statusEl.textContent = "Shape saved";
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = "Failed to save shape";
+    }
+  });
+
+  // Delete a shape when removed from the map via the edit toolbar.
+  map.on(L.Draw.Event.DELETED, async (e) => {
+    e.layers.eachLayer(async (layer) => {
+      if (!layer._dbId) return;
+      try {
+        await fetch(`${API_BASE}/api/shapes/${layer._dbId}`, { method: "DELETE" });
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  });
+
+  loadShapes();
+</script>
+</body>
+</html>
