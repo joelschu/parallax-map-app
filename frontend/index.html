@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <title>Map</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+<link rel="stylesheet" href="https://unpkg.com/@hyvilo/maplibre-gl-draw/dist/maplibre-gl-draw.css" />
 <style>
   html, body { margin: 0; height: 100%; font-family: sans-serif; }
   #map { height: 100%; width: 100%; }
   #status {
-    position: absolute; top: 10px; left: 50px; z-index: 1000;
+    position: absolute; bottom: 5px; right: 5px; z-index: 1000;
     background: white; padding: 6px 12px; border-radius: 4px;
     font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   }
@@ -26,28 +26,53 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   }
   #form-card h3 { margin: 0 0 12px; font-size: 16px; }
-  #form-card label {
-    display: block; font-size: 12px; color: #555; margin: 10px 0 4px;
-  }
-  #form-card input, #form-card textarea {
+  #form-card label { display: block; font-size: 12px; color: #555; margin: 10px 0 4px; }
+  #form-card input {
     width: 100%; box-sizing: border-box; padding: 6px 8px;
     font-size: 13px; border: 1px solid #ccc; border-radius: 4px;
   }
-  #form-actions {
-    display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
-  }
+  #form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   #form-actions button {
     padding: 6px 14px; font-size: 13px; border-radius: 4px;
     border: 1px solid #ccc; background: white; cursor: pointer;
   }
-  #form-actions button.primary {
-    background: #2b6cb0; color: white; border-color: #2b6cb0;
+  #form-actions button.primary { background: #2b6cb0; color: white; border-color: #2b6cb0; }
+
+  .maplibregl-popup-content { font-size: 13px; }
+
+  /* Persistent sidebar: constantly lists shape names, expands details on click */
+  #sidebar {
+    position: absolute; top: 5px; left: 5px; bottom: 5px;
+    width: 280px; background: white; border-radius: 5px;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.3);
+    padding: 12px; overflow-y: auto; z-index: 900;
+    box-sizing: border-box;
   }
+  #sidebar h3 { margin: 0 0 10px; font-size: 14px; }
+  .sidebar-item {
+    border-bottom: 1px solid #eee; padding: 8px 4px; cursor: pointer;
+  }
+  .sidebar-item:last-child { border-bottom: none; }
+  .sidebar-item-title {
+    font-size: 13px; font-weight: 600; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  .sidebar-item.active .sidebar-item-title { color: #2b6cb0; }
+  .sidebar-item-details {
+    display: none; font-size: 12px; color: #555; margin-top: 6px; line-height: 1.5;
+  }
+  .sidebar-item.active .sidebar-item-details { display: block; }
+  .sidebar-empty { font-size: 12px; color: #888; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="status">Loading…</div>
+
+<div id="sidebar">
+  <h3>Datapoints</h3>
+  <div id="sidebar-list"><div class="sidebar-empty">No shapes yet</div></div>
+</div>
 
 <div id="overlay">
   <div id="form-card">
@@ -79,42 +104,127 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@hyvilo/maplibre-gl-draw/dist/maplibre-gl-draw.js"></script>
 <script>
+  // This fork exposes itself under a couple of possible global names
+  // depending on build — fall back gracefully so it's obvious in the
+  // console if neither is present.
+  const DrawCtor = window.MapLibreDraw || window.MapboxDraw;
+  if (!DrawCtor) {
+    console.error("Draw library did not load — check the <script> tag URL above.");
+  }
 
-  const API_BASE = "https://parallax-map-app.onrender.com";
+  // Point this at your deployed API.
+  const API_BASE = "http://localhost:3001";
 
-  const map = L.map("map", {
-    minZoom:10
-  })
-  .setView([50.952301362948674, 1.8607453758982468], 12);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(map);
+  // MapLibre needs an explicit style (Leaflet's tileLayer had no equivalent
+  // "default" — this is the MapLibre way of saying "use plain OSM tiles").
+  // const osmStyle = {
+  //   version: 8,
+  //   sources: {
+  //     osm: {
+  //       type: "raster",
+  //       tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+  //       tileSize: 256,
+  //       attribution: "&copy; OpenStreetMap contributors",
+  //     },
+  //   },
+  //   layers: [{ id: "osm", type: "raster", source: "osm" }],
+  // };
 
-  const drawnItems = new L.FeatureGroup().addTo(map);
-
-  const drawControl = new L.Control.Draw({
-    edit: { featureGroup: drawnItems },
-    draw: {
-      polygon: true,
-      polyline: true,
-      rectangle: true,
-      circle: false,
-      circlemarker: false,
-      marker: true,
+  const satelliteTiles ={
+      version: 8,
+    sources: {
+      "raster-tiles": {
+        type: "raster",
+        tiles: [
+          "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        ],
+        tileSize: 256,
+      },
     },
+    layers: [{ id: "raster-layer", type: "raster", source: "raster-tiles" }],
+  };
+
+  const map = new maplibregl.Map({
+    container: "map",
+    style: satelliteTiles,
+    center: [1.8548053645475266,50.962380362495715],
+    zoom: 12,
+    minZoom: 8
   });
-  map.addControl(drawControl);
+  map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+  map.on('style.load', () => {
+    map.setProjection({
+      type: 'globe'
+    })
+  })
+
+  const draw = new DrawCtor({
+    displayControlsDefault: false,
+    controls: { point: true, line_string: true, polygon: true, trash: true },
+    styles: [
+    // Polygon fill (inactive/saved)
+    {
+      id: "gl-draw-polygon-fill",
+      type: "fill",
+      filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
+      paint: { "fill-color": "red", "fill-opacity": 0.2 },
+    },
+    // Polygon outline
+    {
+      id: "gl-draw-polygon-stroke",
+      type: "line",
+      filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
+      paint: { "line-color": "red", "line-width": 1.5 },
+    },
+    // Line strings
+    {
+      id: "gl-draw-line",
+      type: "line",
+      filter: ["all", ["==", "$type", "LineString"], ["!=", "mode", "static"]],
+      paint: { "line-color": "red", "line-width": 2.5 },
+    },
+    // Points (vertices of the shape itself)
+    {
+      id: "gl-draw-point",
+      type: "circle",
+      filter: ["all", ["==", "$type", "Point"], ["==", "meta", "feature"], ["!=", "mode", "static"]],
+      paint: {
+        "circle-radius": 6,
+        "circle-color": "red",
+        "circle-stroke-color": "white",
+        "circle-stroke-width": 2,
+      },
+    },
+    // Vertex handles while actively drawing/editing (the small drag points on a polygon/line)
+    {
+      id: "gl-draw-vertex",
+      type: "circle",
+      filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]],
+      paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": "#2b6cb0", "circle-stroke-width": 2 },
+    },
+  ],
+  });
+  map.addControl(draw, "top-right");
 
   const statusEl = document.getElementById("status");
   const overlay = document.getElementById("overlay");
   const form = document.getElementById("datapoint-form");
   const cancelBtn = document.getElementById("cancel-btn");
+  const sidebarListEl = document.getElementById("sidebar-list");
 
-  // Builds a readable popup body from a properties object.
-  function popupContent(props) {
+  // Local mirror of every shape's data, keyed by Draw's feature id — this is
+  // what the sidebar renders from, so it stays in sync with the map.
+  const shapesById = new Map();
+  let activeFeatureId = null;
+
+  function detailRows(props) {
     const rows = [
       ["Start", props.start_date],
       ["End", props.end_date],
@@ -122,13 +232,57 @@
       ["Cost", props.cost != null && props.cost !== "" ? props.cost : null],
       ["Funders", props.funders],
     ].filter(([, value]) => value);
-
-    const title = props.name ? `<strong>${props.name}</strong><br>` : "";
-    const details = rows.map(([k, v]) => `${k}: ${v}`).join("<br>");
-    return title + details || "(no details)";
+    return rows.map(([k, v]) => `${k}: ${v}`).join("<br>") || "(no details)";
   }
 
-  // Opens the form modal and resolves with the entered fields, or null if cancelled.
+  function renderSidebar() {
+    if (shapesById.size === 0) {
+      sidebarListEl.innerHTML = `<div class="sidebar-empty">No shapes yet</div>`;
+      return;
+    }
+    sidebarListEl.innerHTML = "";
+    shapesById.forEach((props, featureId) => {
+      const item = document.createElement("div");
+      item.className = "sidebar-item" + (featureId === activeFeatureId ? " active" : "");
+      item.innerHTML = `
+        <div class="sidebar-item-title">${props.name || "(unnamed)"}</div>
+        <div class="sidebar-item-details">${detailRows(props)}</div>
+      `;
+      item.addEventListener("click", () => selectFeature(featureId, { fly: true }));
+      sidebarListEl.appendChild(item);
+    });
+  }
+
+  // Selects a shape both on the map (Draw's selection) and in the sidebar
+  // (expands its details). Called from either a map click or a list click.
+  function selectFeature(featureId, { fly = false } = {}) {
+    activeFeatureId = featureId;
+    draw.changeMode("simple_select", { featureIds: [featureId] });
+    renderSidebar();
+
+    if (fly) {
+      const feature = draw.get(featureId);
+      if (feature) {
+        const coords = getRepresentativeCoords(feature.geometry);
+        if (coords) map.flyTo({ center: coords, zoom: Math.max(map.getZoom(), 10) });
+      }
+    }
+  }
+
+  // Grabs a single [lng, lat] to fly to, regardless of geometry type.
+  function getRepresentativeCoords(geometry) {
+    if (!geometry) return null;
+    if (geometry.type === "Point") return geometry.coordinates;
+    if (geometry.type === "LineString") return geometry.coordinates[0];
+    if (geometry.type === "Polygon") return geometry.coordinates[0][0];
+    return null;
+  }
+
+  function popupContent(props) {
+    const title = props.name ? `<strong>${props.name}</strong><br>` : "";
+    return title + detailRows(props);
+  }
+
   function promptForDetails() {
     return new Promise((resolve) => {
       form.reset();
@@ -154,49 +308,51 @@
     });
   }
 
-  // Load existing shapes on startup.
-  async function loadShapes() {
+  // Load existing shapes once the map + style are ready.
+  map.on("load", async () => {
     statusEl.textContent = "Loading shapes…";
     try {
       const res = await fetch(`${API_BASE}/api/shapes`);
       const geojson = await res.json();
-      L.geoJSON(geojson, {
-        onEachFeature: (feature, layer) => {
-          layer._dbId = feature.id;
-          layer.bindPopup(popupContent(feature.properties || {}));
-        },
-      }).eachLayer((layer) => drawnItems.addLayer(layer));
+      geojson.features.forEach((f) => {
+        // Draw assigns its own internal feature id, so keep the database id
+        // as a separate property to reference on delete.
+        f.properties = { ...f.properties, dbId: f.id };
+        const addedId = draw.add(f)[0];
+        shapesById.set(addedId, f.properties);
+      });
       statusEl.textContent = `${geojson.features.length} shape(s) loaded`;
+      renderSidebar();
     } catch (err) {
       console.error(err);
       statusEl.textContent = "Could not reach the API";
     }
-  }
+  });
 
   // Save a newly drawn shape, after collecting its data fields.
-  map.on(L.Draw.Event.CREATED, async (e) => {
-    const layer = e.layer;
-    drawnItems.addLayer(layer);
+  map.on("draw.create", async (e) => {
+    const feature = e.features[0];
 
     const details = await promptForDetails();
     if (!details) {
-      // User cancelled — drop the shape instead of saving it half-filled.
-      drawnItems.removeLayer(layer);
+      draw.delete(feature.id);
       return;
     }
 
-    const feature = layer.toGeoJSON();
-    feature.properties = { ...feature.properties, ...details };
+    const toSave = { ...feature, properties: { ...feature.properties, ...details } };
+    delete toSave.id; // let the database assign its own id
 
     try {
       const res = await fetch(`${API_BASE}/api/shapes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(feature),
+        body: JSON.stringify(toSave),
       });
       const saved = await res.json();
-      layer._dbId = saved.id;
-      layer.bindPopup(popupContent(saved.properties || {}));
+      draw.setFeatureProperty(feature.id, "dbId", saved.id);
+      Object.entries(details).forEach(([k, v]) => draw.setFeatureProperty(feature.id, k, v));
+      shapesById.set(feature.id, { ...feature.properties, ...details, dbId: saved.id });
+      renderSidebar();
       statusEl.textContent = "Shape saved";
     } catch (err) {
       console.error(err);
@@ -204,19 +360,34 @@
     }
   });
 
-  // Delete a shape when removed from the map via the edit toolbar.
-  map.on(L.Draw.Event.DELETED, async (e) => {
-    e.layers.eachLayer(async (layer) => {
-      if (!layer._dbId) return;
+  // Delete a shape when removed via the trash control.
+  map.on("draw.delete", async (e) => {
+    for (const feature of e.features) {
+      shapesById.delete(feature.id);
+      if (activeFeatureId === feature.id) activeFeatureId = null;
+      const dbId = feature.properties?.dbId;
+      if (!dbId) continue;
       try {
-        await fetch(`${API_BASE}/api/shapes/${layer._dbId}`, { method: "DELETE" });
+        await fetch(`${API_BASE}/api/shapes/${dbId}`, { method: "DELETE" });
       } catch (err) {
         console.error(err);
       }
-    });
+    }
+    renderSidebar();
   });
 
-  loadShapes();
+  // Clicking a shape on the map selects it in the sidebar too (no fly, since
+  // the user is already looking at it).
+  map.on("draw.selectionchange", (e) => {
+    const feature = e.features[0];
+    if (!feature) {
+      activeFeatureId = null;
+      renderSidebar();
+      return;
+    }
+    activeFeatureId = feature.id;
+    renderSidebar();
+  });
 </script>
 </body>
 </html>
