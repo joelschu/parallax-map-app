@@ -82,9 +82,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script>
-  // Point this at your deployed API. For local dev, leave as-is with the
-  // backend running on port 3001.
-  const API_BASE = "http://localhost:3001";
+
+  const API_BASE = "https://parallax-map-app.onrender.com/api/shapes";
 
   const map = L.map("map").setView([0, 0], 2);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
