@@ -43,7 +43,8 @@
   /* Persistent sidebar: constantly lists shape names, expands details on click */
   #sidebar {
     position: absolute; top: 5px; left: 5px; bottom: 5px;
-    width: 280px; background: white; border-radius: 5px;
+    width: 280px; background: rgb(73, 73, 73); border-radius: 5px;
+    color: white;
     box-shadow: 0 1px 8px rgba(0,0,0,0.3);
     padding: 12px; overflow-y: auto; z-index: 900;
     box-sizing: border-box;
@@ -63,6 +64,17 @@
   }
   .sidebar-item.active .sidebar-item-details { display: block; }
   .sidebar-empty { font-size: 12px; color: #888; }
+
+  .sidebar-item-details input {
+  width: 100%; box-sizing: border-box; padding: 4px 6px; margin: 2px 0 6px;
+  font-size: 12px; border: 1px solid #ccc; border-radius: 4px;
+}
+.sidebar-item-details label { display: block; font-size: 11px; color: #777; }
+.sidebar-edit-btn, .sidebar-save-btn {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  border: 1px solid #ccc; background: white; cursor: pointer;
+}
+.sidebar-save-btn { background: #2b6cb0; color: white; border-color: #2b6cb0; }
 </style>
 </head>
 <body>
@@ -235,23 +247,104 @@
     return rows.map(([k, v]) => `${k}: ${v}`).join("<br>") || "(no details)";
   }
 
-  function renderSidebar() {
-    if (shapesById.size === 0) {
-      sidebarListEl.innerHTML = `<div class="sidebar-empty">No shapes yet</div>`;
-      return;
-    }
-    sidebarListEl.innerHTML = "";
-    shapesById.forEach((props, featureId) => {
-      const item = document.createElement("div");
-      item.className = "sidebar-item" + (featureId === activeFeatureId ? " active" : "");
-      item.innerHTML = `
-        <div class="sidebar-item-title">${props.name || "(unnamed)"}</div>
-        <div class="sidebar-item-details">${detailRows(props)}</div>
-      `;
-      item.addEventListener("click", () => selectFeature(featureId, { fly: true }));
-      sidebarListEl.appendChild(item);
-    });
+  let editingFeatureId = null;
+
+const FIELD_DEFS = [
+  ["name", "Name", "text"],
+  ["start_date", "Start date", "date"],
+  ["end_date", "End date", "date"],
+  ["policy", "Policy", "text"],
+  ["cost", "Cost", "number"],
+  ["funders", "Funders", "text"],
+];
+
+function editFormHtml(props) {
+  return FIELD_DEFS.map(
+    ([key, label, type]) => `
+      <label>${label}</label>
+      <input data-field="${key}" type="${type}" value="${props[key] ?? ""}" ${type === "number" ? 'step="0.01"' : ""} />
+    `
+  ).join("");
+}
+
+function renderSidebar() {
+  if (shapesById.size === 0) {
+    sidebarListEl.innerHTML = `<div class="sidebar-empty">No shapes yet</div>`;
+    return;
   }
+  sidebarListEl.innerHTML = "";
+  shapesById.forEach((props, featureId) => {
+    const isActive = featureId === activeFeatureId;
+    const isEditing = featureId === editingFeatureId;
+
+    const item = document.createElement("div");
+    item.className = "sidebar-item" + (isActive ? " active" : "");
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "sidebar-item-title";
+    titleRow.innerHTML = `<span>${props.name || "(unnamed)"}</span>`;
+    if (isActive && !isEditing) {
+      const editBtn = document.createElement("button");
+      editBtn.className = "sidebar-edit-btn";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        editingFeatureId = featureId;
+        renderSidebar();
+      });
+      titleRow.appendChild(editBtn);
+    }
+    titleRow.addEventListener("click", () => selectFeature(featureId, { fly: true }));
+
+    const detailsEl = document.createElement("div");
+    detailsEl.className = "sidebar-item-details";
+
+    if (isEditing) {
+      detailsEl.innerHTML = editFormHtml(props);
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "sidebar-save-btn";
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const inputs = detailsEl.querySelectorAll("input[data-field]");
+        const updated = {};
+        inputs.forEach((input) => (updated[input.dataset.field] = input.value));
+        await saveEdit(featureId, updated);
+      });
+      detailsEl.appendChild(saveBtn);
+    } else {
+      detailsEl.innerHTML = detailRows(props);
+    }
+
+    item.appendChild(titleRow);
+    item.appendChild(detailsEl);
+    sidebarListEl.appendChild(item);
+  });
+}
+
+async function saveEdit(featureId, updated) {
+  const props = shapesById.get(featureId);
+  const dbId = props?.dbId;
+  if (!dbId) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/shapes/${dbId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+    const saved = await res.json();
+    const newProps = { ...saved.properties, dbId };
+    shapesById.set(featureId, newProps);
+    Object.entries(newProps).forEach(([k, v]) => draw.setFeatureProperty(featureId, k, v));
+    editingFeatureId = null;
+    renderSidebar();
+    statusEl.textContent = "Shape updated";
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Failed to update shape";
+  }
+}
 
   // Selects a shape both on the map (Draw's selection) and in the sidebar
   // (expands its details). Called from either a map click or a list click.
