@@ -44,7 +44,7 @@
   }
   #form-card h3 { margin: 0 0 12px; font-size: 16px; }
   #form-card label { display: block; font-size: 12px; color: #555; margin: 10px 0 4px; }
-  #form-card input {
+  #form-card input, #form-card select {
     width: 100%; box-sizing: border-box; padding: 6px 8px;
     font-size: 13px; border: 1px solid #ccc; border-radius: 4px;
   }
@@ -84,7 +84,7 @@
   .sidebar-item.active .sidebar-item-details { display: block; }
   .sidebar-empty { font-size: 12px; color: rgb(146, 146, 146); padding: 0 10px;}
 
-  .sidebar-item-details input {
+  .sidebar-item-details input, .sidebar-item-details select {
   width: 100%; box-sizing: border-box; padding: 4px 6px; margin: 2px 0 6px;
   font-size: 12px; border: 1px solid #ccc; border-radius: 4px;
 }
@@ -95,16 +95,24 @@
 }
 .sidebar-save-btn { background: rgb(0, 100, 181); color: white; border-color: #2b6cb0; border-radius: 20px;}
 
+.detail-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
 .detail-label{
 padding-right: 10px;
 font-size: 10px;
 font-weight: 500;
 text-transform: uppercase;
+flex: 0 0 70px;
 }
 
 .detail-value{
-position: absolute;
-left: 80px;
+flex: 1;
+min-width: 0;
+overflow-wrap: break-word;
+word-break: break-word;
 }
 
 </style>
@@ -121,10 +129,26 @@ left: 80px;
 
 <div id="overlay">
   <div id="form-card">
-    <h3>Add details</h3>
+    <h3>Add details to Intervention</h3>
     <form id="datapoint-form">
-      <label for="f-name">Name</label>
-      <input id="f-name" name="name" type="text" placeholder="e.g. River restoration zone" />
+      <label for="f-item">Item</label>
+      <input id="f-item" name="item" type="text" placeholder="e.g. Detention Centre" />
+      
+      <label for="f-intervention">Intervention</label>
+      <select id="f-intervention" name="intervention">
+        <option value="">-- Select --</option>
+        <option value="Landscaping">Landscaping</option>
+        <option value="Demolition">Demolition</option>
+        <option value="Construction - small scale">Construction - small scale</option>
+        <option value="Construction - large scale">Construction - large scale</option>
+        <option value="Securitisation">Securitisation</option>
+      </select>
+
+      <label for="f-area">Area</label>
+      <input id="f-area" name="area" type="text" />
+
+      <label for="f-site">Site</label>
+      <input id="f-site" name="site" type="text" />
 
       <label for="f-start">Start date</label>
       <input id="f-start" name="start_date" type="date" />
@@ -132,14 +156,23 @@ left: 80px;
       <label for="f-end">End date</label>
       <input id="f-end" name="end_date" type="date" />
 
+      <label for="f-funding-source">Funding source</label>
+      <input id="f-funding-source" name="funding_source" type="text" />
+
+      <label for="f-funding-amount">Funding amount</label>
+      <input id="f-funding-amount" name="funding_amount" type="number" step="0.01" />
+
+      <label for="f-contractors">Contractors</label>
+      <input id="f-contractors" name="contractors" type="text" />
+
       <label for="f-policy">Policy</label>
       <input id="f-policy" name="policy" type="text" placeholder="e.g. Clean Water Act" />
 
-      <label for="f-cost">Cost</label>
-      <input id="f-cost" name="cost" type="number" step="0.01" placeholder="e.g. 25000" />
+      <label for="f-description">Description</label>
+      <input id="f-description" name="description" type="text" />
 
-      <label for="f-funders">Funders</label>
-      <input id="f-funders" name="funders" type="text" placeholder="e.g. EU LIFE, City Council" />
+      <label for="f-sources">Sources</label>
+      <input id="f-sources" name="sources" type="text" />
 
       <div id="form-actions">
         <button type="button" id="cancel-btn">Cancel</button>
@@ -162,21 +195,6 @@ left: 80px;
 
   // Point this at your deployed API.
   const API_BASE = "https://parallax-map-app.onrender.com";
-
-  // MapLibre needs an explicit style (Leaflet's tileLayer had no equivalent
-  // "default" — this is the MapLibre way of saying "use plain OSM tiles").
-  // const osmStyle = {
-  //   version: 8,
-  //   sources: {
-  //     osm: {
-  //       type: "raster",
-  //       tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-  //       tileSize: 256,
-  //       attribution: "&copy; OpenStreetMap contributors",
-  //     },
-  //   },
-  //   layers: [{ id: "osm", type: "raster", source: "osm" }],
-  // };
 
   const satelliteTiles ={
       version: 8,
@@ -268,15 +286,22 @@ left: 80px;
   // what the sidebar renders from, so it stays in sync with the map.
   const shapesById = new Map();
   let activeFeatureId = null;
+  let editingFeatureId = null;
 
   function detailRows(props) {
     const rows = [
-    ["Start", props.start_date],
-    ["End", props.end_date],
-    ["Policy", props.policy],
-    ["Cost", props.cost != null && props.cost !== "" ? props.cost : null],
-    ["Funders", props.funders],
-  ].filter(([, value]) => value);
+    ["Item", props.item],
+      ["Area", props.area],
+      ["Site", props.site],
+      ["Start", props.start_date],
+      ["End", props.end_date],
+      ["Funding source", props.funding_source],
+      ["Funding amount", props.funding_amount != null && props.funding_amount !== "" ? props.funding_amount : null],
+      ["Contractors", props.contractors],
+      ["Policy", props.policy],
+      ["Description", props.description],
+      ["Sources", props.sources],
+    ].filter(([, value]) => value);
 
   if (rows.length === 0) return `<div class="detail-empty">To add more details, press Edit button</div>`;
 
@@ -292,25 +317,54 @@ left: 80px;
     .join("");
   }
 
-  let editingFeatureId = null;
+  // Options for every <select> field in the edit form, keyed by field name —
+  // must match the <option> values in the "Add details" form above so a
+  // shape edited later shows the same choices as when it was created.
+  const SELECT_OPTIONS = {
+    intervention: [
+      "Landscaping",
+      "Demolition",
+      "Construction - small scale",
+      "Construction - large scale",
+      "Securitisation",
+    ],
+  };
 
-const FIELD_DEFS = [
-  ["name", "Name", "text"],
-  ["start_date", "Start date", "date"],
-  ["end_date", "End date", "date"],
-  ["policy", "Policy", "text"],
-  ["cost", "Cost", "number"],
-  ["funders", "Funders", "text"],
-];
+  const FIELD_DEFS = [
+    ["item", "Item", "text"],
+    ["intervention", "Intervention", "select"],
+    ["area", "Area", "text"],
+    ["site", "Site", "text"],
+    ["start_date", "Start date", "date"],
+    ["end_date", "End date", "date"],
+    ["funding_source", "Funding source", "text"],
+    ["funding_amount", "Funding amount", "number"],
+    ["contractors", "Contractors", "text"],
+    ["policy", "Policy", "text"],
+    ["description", "Description", "text"],
+    ["sources", "Sources", "text"],
+  ];
 
-function editFormHtml(props) {
-  return FIELD_DEFS.map(
-    ([key, label, type]) => `
-      <label>${label}</label>
-      <input data-field="${key}" type="${type}" value="${props[key] ?? ""}" ${type === "number" ? 'step="0.01"' : ""} />
-    `
-  ).join("");
-}
+ function editFormHtml(props) {
+    return FIELD_DEFS.map(([key, label, type]) => {
+      if (type === "select") {
+        const options = (SELECT_OPTIONS[key] || []).map(
+          (opt) => `<option value="${opt}" ${props[key] === opt ? "selected" : ""}>${opt}</option>`
+        ).join("");
+        return `
+          <label>${label}</label>
+          <select data-field="${key}">
+            <option value="">-- Select --</option>
+            ${options}
+          </select>
+        `;
+      }
+      return `
+        <label>${label}</label>
+        <input data-field="${key}" type="${type}" value="${props[key] ?? ""}" ${type === "number" ? 'step="0.01"' : ""} />
+      `;
+    }).join("");
+  }
 
 function renderSidebar() {
   if (shapesById.size === 0) {
@@ -327,7 +381,9 @@ function renderSidebar() {
 
     const titleRow = document.createElement("div");
     titleRow.className = "sidebar-item-title";
-    titleRow.innerHTML = `<span>${props.name || "(unnamed)"}</span>`;
+    // "item" holds the specific name (e.g. "Detention Centre") — that's the
+    // natural title, since "intervention" is now a category, not a unique name.
+    titleRow.innerHTML = `<span>${props.item || props.intervention || "(unnamed)"}</span>`;
     if (isActive && !isEditing) {
       const editBtn = document.createElement("button");
       editBtn.className = "sidebar-edit-btn";
@@ -351,9 +407,11 @@ function renderSidebar() {
       saveBtn.textContent = "Save";
       saveBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        const inputs = detailsEl.querySelectorAll("input[data-field]");
+        // Query both inputs AND selects — the previous version only grabbed
+        // <input>, which silently dropped the Intervention dropdown's value.
+        const fields = detailsEl.querySelectorAll("[data-field]");
         const updated = {};
-        inputs.forEach((input) => (updated[input.dataset.field] = input.value));
+        fields.forEach((el) => (updated[el.dataset.field] = el.value));
         await saveEdit(featureId, updated);
       });
       detailsEl.appendChild(saveBtn);
@@ -417,7 +475,7 @@ async function saveEdit(featureId, updated) {
   }
 
   function popupContent(props) {
-    const title = props.name ? `<strong>${props.name}</strong><br>` : "";
+    const title = props.item ? `<strong>${props.item}</strong><br>` : "";
     return title + detailRows(props);
   }
 
