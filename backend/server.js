@@ -134,6 +134,62 @@ app.post("/api/shapes", async (req, res) => {
   }
 });
 
+// PUT /api/shapes/:id
+// Body: { name, start_date, end_date, cost, funders, policy } — updates just
+// the data fields, not the geometry (editing shape geometry isn't supported here).
+app.put("/api/shapes/:id", async (req, res) => {
+  try {
+    const {
+      name = null,
+      start_date = null,
+      end_date = null,
+      cost = null,
+      funders = null,
+      policy = null,
+    } = req.body || {};
+
+    const { rows } = await pool.query(
+      `UPDATE shapes
+       SET name = $1, start_date = $2, end_date = $3, cost = $4, funders = $5, policy = $6
+       WHERE id = $7
+       RETURNING id, name, start_date::text AS start_date, end_date::text AS end_date,
+                 cost, funders, policy, properties, ST_AsGeoJSON(geom) AS geojson`,
+      [
+        name || null,
+        start_date || null,
+        end_date || null,
+        cost === "" || cost === undefined ? null : cost,
+        funders || null,
+        policy || null,
+        req.params.id,
+      ]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Shape not found" });
+    }
+
+    const row = rows[0];
+    res.json({
+      type: "Feature",
+      id: row.id,
+      geometry: JSON.parse(row.geojson),
+      properties: {
+        name: row.name,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        cost: row.cost,
+        funders: row.funders,
+        policy: row.policy,
+        ...row.properties,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update shape" });
+  }
+});
+
 // DELETE /api/shapes/:id
 app.delete("/api/shapes/:id", async (req, res) => {
   try {
