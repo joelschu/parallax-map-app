@@ -23,8 +23,8 @@ app.get("/api/shapes", async (req, res) => {
     // and avoids node-pg converting them into JS Date objects with a
     // timezone offset baked in.
     const selectCols = `
-      id, name, start_date::text AS start_date, end_date::text AS end_date,
-      cost, funders, policy, properties, ST_AsGeoJSON(geom) AS geojson
+      id, item, intervention, area, site, start_date::text AS start_date, end_date::text AS end_date,
+      cost, funders, policy, description, properties, ST_AsGeoJSON(geom) AS geojson
     `;
 
     if (bbox) {
