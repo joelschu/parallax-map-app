@@ -5,11 +5,6 @@ import "dotenv/config";
 
 const { Pool } = pg;
 
-// TEMPORARY DEBUG — remove once the connection issue is confirmed fixed.
-console.log("DATABASE_URL is set:", !!process.env.DATABASE_URL);
-console.log("DATABASE_URL starts with:", (process.env.DATABASE_URL || "").slice(0, 15));
-console.log("DATABASE_URL length:", (process.env.DATABASE_URL || "").length);
-
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const app = express();

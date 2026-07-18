@@ -2,12 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Map</title>
+<title>Parallax Mapping Platform</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
 <link rel="stylesheet" href="https://unpkg.com/@hyvilo/maplibre-gl-draw/dist/maplibre-gl-draw.css" />
+<link rel="icon" href="/assets/favicon.png" />
 <style>
-  html, body { margin: 0; height: 100%; font-family: sans-serif; }
+  html, body { margin: 0; height: 100%; font-family: 'Ronzino'; }
   #map { height: 100%; width: 100%; }
+   @font-face {
+  font-family: 'Ronzino';
+  src: url('/fonts/Ronzino-Regular.woff2') format('woff2');
+  font-weight: 400;
+  }
+
+    @font-face {
+  font-family: 'Ronzino';
+  src: url('/fonts/Ronzino-Medium.otf') format('woff2');
+  font-weight: 500;
+  }
+  @font-face {
+  font-family: 'Ronzino';
+  src: url('/fonts/Ronzino-Bold.otf') format('woff2');
+  font-weight: 700;
+  }
   #status {
     position: absolute; bottom: 5px; right: 5px; z-index: 1000;
     background: white; padding: 6px 12px; border-radius: 4px;
@@ -46,24 +63,26 @@
     width: 280px; background: rgb(73, 73, 73); border-radius: 5px;
     color: white;
     box-shadow: 0 1px 8px rgba(0,0,0,0.3);
-    padding: 12px; overflow-y: auto; z-index: 900;
+    padding: 0; overflow-y: auto; z-index: 900;
     box-sizing: border-box;
   }
-  #sidebar h3 { margin: 0 0 10px; font-size: 14px; }
+  #sidebar h3 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; padding: 10px;}
+  #sidebar p {color: rgb(146, 146, 146); font-size: 12px; padding: 0 10px;}
   .sidebar-item {
-    border-bottom: 1px solid #eee; padding: 8px 4px; cursor: pointer;
+    border-bottom: 1px solid #eeeeee65; padding: 7px 10px; cursor: pointer; width: 100%; font-size: 12px; box-sizing: border-box;
   }
   .sidebar-item:last-child { border-bottom: none; }
   .sidebar-item-title {
     font-size: 13px; font-weight: 600; display: flex;
-    justify-content: space-between; align-items: center;
+    width: 100%;
+    justify-content: space-between; align-items: center; 
   }
   .sidebar-item.active .sidebar-item-title { color: #2b6cb0; }
   .sidebar-item-details {
-    display: none; font-size: 12px; color: #555; margin-top: 6px; line-height: 1.5;
+    display: none; font-size: 12px; color: rgb(189, 189, 189); margin-top: 6px; line-height: 1.5; box-sizing: border-box;
   }
   .sidebar-item.active .sidebar-item-details { display: block; }
-  .sidebar-empty { font-size: 12px; color: #888; }
+  .sidebar-empty { font-size: 12px; color: rgb(146, 146, 146); padding: 0 10px;}
 
   .sidebar-item-details input {
   width: 100%; box-sizing: border-box; padding: 4px 6px; margin: 2px 0 6px;
@@ -71,10 +90,23 @@
 }
 .sidebar-item-details label { display: block; font-size: 11px; color: #777; }
 .sidebar-edit-btn, .sidebar-save-btn {
-  font-size: 11px; padding: 2px 8px; border-radius: 4px;
-  border: 1px solid #ccc; background: white; cursor: pointer;
+  font-size: 11px; padding: 2px 8px; border-radius: 20px; color: white;
+  border: 1px solid #2b6cb0; background: rgb(0, 100, 181); cursor: pointer;
 }
-.sidebar-save-btn { background: #2b6cb0; color: white; border-color: #2b6cb0; }
+.sidebar-save-btn { background: rgb(0, 100, 181); color: white; border-color: #2b6cb0; border-radius: 20px;}
+
+.detail-label{
+padding-right: 10px;
+font-size: 10px;
+font-weight: 500;
+text-transform: uppercase;
+}
+
+.detail-value{
+position: absolute;
+left: 80px;
+}
+
 </style>
 </head>
 <body>
@@ -82,7 +114,8 @@
 <div id="status">Loading…</div>
 
 <div id="sidebar">
-  <h3>Datapoints</h3>
+  <h3>Hostile Architecture Log</h3>
+  <p>Use the tool bar on the right to add lines, polygons and points. Change existing information by clicking on edit button and save.</p>
   <div id="sidebar-list"><div class="sidebar-empty">No shapes yet</div></div>
 </div>
 
@@ -238,13 +271,25 @@
 
   function detailRows(props) {
     const rows = [
-      ["Start", props.start_date],
-      ["End", props.end_date],
-      ["Policy", props.policy],
-      ["Cost", props.cost != null && props.cost !== "" ? props.cost : null],
-      ["Funders", props.funders],
-    ].filter(([, value]) => value);
-    return rows.map(([k, v]) => `${k}: ${v}`).join("<br>") || "(no details)";
+    ["Start", props.start_date],
+    ["End", props.end_date],
+    ["Policy", props.policy],
+    ["Cost", props.cost != null && props.cost !== "" ? props.cost : null],
+    ["Funders", props.funders],
+  ].filter(([, value]) => value);
+
+  if (rows.length === 0) return `<div class="detail-empty">To add more details, press Edit button</div>`;
+
+  return rows
+    .map(
+      ([k, v]) => `
+        <div class="detail-row">
+          <span class="detail-label">${k}</span>
+          <span class="detail-value">${v}</span>
+        </div>
+      `
+    )
+    .join("");
   }
 
   let editingFeatureId = null;
